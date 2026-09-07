@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>きょうの じかんわり</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    background: linear-gradient(160deg, #FFF8EE 0%, #EEF6FF 100%);
+    font-family: "Hiragino Maru Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+
+  /* ── ヘッダー ── */
+  #header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: rgba(255,255,255,0.92);
+    border-bottom: 3px solid #FFD080;
+    flex-shrink: 0;
+    min-height: 64px;
+  }
+
+  #title {
+    font-size: 18px;
+    font-weight: bold;
+    color: #E67E22;
+    white-space: nowrap;
+  }
+
+  #banner {
+    flex: 1;
+    text-align: center;
+    font-size: 19px;
+    font-weight: bold;
+    color: #7F8C8D;
+    background: #F4F6F7;
+    border: 3px solid #D5D8DC;
+    border-radius: 36px;
+    padding: 10px 16px;
+    transition: all 0.2s;
+    line-height: 1.2;
+  }
+  #banner.ready {
+    color: #C0392B;
+    background: #FEF0E7;
+    border-color: #E67E22;
+  }
+
+  .hdr-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 72px;
+    min-height: 52px;
+    border-radius: 16px;
+    border-width: 3px;
+    border-style: solid;
+    cursor: pointer;
+    font-weight: bold;
+    gap: 1px;
+    padding: 4px 8px;
+    flex-shrink: 0;
+  }
+  .hdr-btn .ico { font-size: 22px; }
+  .hdr-btn .lbl { font-size: 13px; }
+  #btn-save  { background:#EBF5FB; border-color:#AED6F1; color:#2471A3; }
+  #btn-reset { background:#FDEDEC; border-color:#F5B7B1; color:#C0392B; }
+
+  /* ── メインエリア ── */
+  #main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  /* ── 左：スロット ── */
+  #slots {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 38%;
+    flex-shrink: 0;
+  }
+
+  .slot {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 4px solid #D5D8DC;
+    background: rgba(255,255,255,0.75);
+    transition: all 0.18s;
+    cursor: default;
+  }
+  .slot.can-receive {
+    border-color: #F39C12;
+    background: #FFFBF0;
+    box-shadow: 0 0 0 3px #F39C1240, 0 4px 12px rgba(0,0,0,0.1);
+    transform: scale(1.02);
+    cursor: pointer;
+  }
+  .slot.can-erase {
+    border-color: #E74C3C;
+    box-shadow: 0 0 0 3px #E74C3C40, 0 4px 12px rgba(0,0,0,0.1);
+    transform: scale(1.02);
+    cursor: pointer;
+  }
+  .slot.filled {
+    box-shadow: 0 2px 6px rgba(0,0,0,0.07);
+  }
+
+  .slot-label {
+    font-size: 15px;
+    font-weight: bold;
+    color: #AAB7B8;
+    min-width: 52px;
+    flex-shrink: 0;
+    line-height: 1.2;
+    text-align: center;
+  }
+  .slot.can-receive .slot-label,
+  .slot.can-erase .slot-label { color: #E67E22; }
+
+  .slot-content {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 1;
+    min-width: 0;
+  }
+  .slot-emoji { font-size: 28px; flex-shrink: 0; }
+  .slot-name  { font-size: 20px; font-weight: bold; line-height: 1.1; }
+  .slot-sub   { font-size: 12px; }
+  .slot-hint  { font-size: 16px; color: #C8D6D8; }
+  .slot.can-receive .slot-hint,
+  .slot.can-erase  .slot-hint { color: #E67E22; font-weight: bold; }
+
+  /* ── 右：カードパレット ── */
+  #palette {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 7px;
+    align-content: stretch;
+  }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 20px;
+    border: 4px solid #E0E8F0;
+    background: rgba(255,255,255,0.92);
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    transition: all 0.15s;
+    padding: 6px 4px;
+  }
+  .card.selected {
+    box-shadow: 0 0 0 4px var(--c40), 0 6px 20px rgba(0,0,0,0.15);
+    transform: scale(1.07);
+    outline: 3px solid var(--col);
+    outline-offset: 3px;
+  }
+  .card-emoji { font-size: 32px; }
+  .card-name  { font-size: 20px; font-weight: bold; margin-top: 4px; text-align: center; line-height: 1.15; }
+  .card-sub   { font-size: 13px; text-align: center; }
+  .card-kana  { font-size: 15px; font-weight: bold; margin-top: 4px; text-align: center; line-height: 1.3; white-space: pre-line; }
+
+  /* ── トースト ── */
+  #toast {
+    position: absolute;
+    top: 74px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #fff;
+    font-size: 20px;
+    font-weight: bold;
+    padding: 12px 32px;
+    border-radius: 36px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    z-index: 100;
+    pointer-events: none;
+    display: none;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<!-- ヘッダー -->
+<div id="header">
+  <div id="title">📅 じかんわり</div>
+  <div id="banner">かもくカードを えらんでね</div>
+  <button class="hdr-btn" id="btn-save">
+    <span class="ico">💾</span><span class="lbl">ほぞん</span>
+  </button>
+  <button class="hdr-btn" id="btn-reset">
+    <span class="ico">🔄</span><span class="lbl">リセット</span>
+  </button>
+</div>
+
+<!-- メイン -->
+<div id="main">
+  <div id="slots"></div>
+  <div id="palette"></div>
+</div>
+
+<!-- トースト -->
+<div id="toast"></div>
+
+<script>
+const SUBJECTS = [
+  { id:"nichijo",  emoji:"🏠", label:"にちじょう\nせいかつ", color:"#7D5A3C", bg:"#FDF3EB", kana:true },
+  { id:"kokugo",   emoji:"📖", label:"国語",  sub:"こくご",   color:"#C0392B", bg:"#FDEDEC" },
+  { id:"sansu",    emoji:"✏️", label:"算数",  sub:"さんすう", color:"#E67E22", bg:"#FEF9E7" },
+  { id:"zuko",     emoji:"🎨", label:"図工",  sub:"ずこう",   color:"#E91E8C", bg:"#FDE8F4" },
+  { id:"seikatsu", emoji:"🌱", label:"生活",  sub:"せいかつ", color:"#1A7A42", bg:"#E9F7EF" },
+  { id:"taiiku",   emoji:"⚽", label:"体育",  sub:"たいいく", color:"#D35400", bg:"#FEF5E7" },
+  { id:"ongaku",   emoji:"🎵", label:"音楽",  sub:"おんがく", color:"#7D3C98", bg:"#F4ECF7" },
+  { id:"dotoku",   emoji:"💛", label:"道徳",  sub:"どうとく", color:"#B7950B", bg:"#FEFDE7" },
+  { id:"sogo",     emoji:"🧩", label:"総合",  sub:"そうごう", color:"#1F5E99", bg:"#EBF5FB" },
+  { id:"tokkatsu", emoji:"🌈", label:"とくべつ\nかつどう",   color:"#0E7A6E", bg:"#E8F8F5", kana:true },
+  { id:"jiritsu",  emoji:"⭐", label:"じりつ",              color:"#5B3DB8", bg:"#EFE8FF", kana:true },
+  { id:"clear",    emoji:"✖️", label:"けす",               color:"#95A5A6", bg:"#F8F9F9", isClear:true, kana:true },
+];
+
+const PERIOD_SHORT = ["1じかん","2じかん","3じかん","4じかん","5じかん","6じかん"];
+const STORAGE_KEY  = "jikanwari_schedule";
+
+let schedule = Array(6).fill(null); // 各コマに入った subject or null
+let selected  = null;               // 選択中の subject or null
+let toastTimer = null;
+
+// ── 描画 ─────────────────────────────────
+function render() {
+  renderSlots();
+  renderPalette();
+  renderBanner();
+}
+
+function renderSlots() {
+  const container = document.getElementById("slots");
+  container.innerHTML = "";
+
+  schedule.forEach((item, i) => {
+    const div = document.createElement("div");
+    div.className = "slot";
+
+    const canReceive = selected && !selected.isClear;
+    const canErase   = selected && selected.isClear && item;
+
+    if (canReceive) { div.classList.add("can-receive"); }
+    else if (canErase) { div.classList.add("can-erase"); }
+    else if (item) {
+      div.classList.add("filled");
+      div.style.borderColor = item.color;
+      div.style.background  = item.bg;
+    }
+
+    // 時間ラベル
+    const lbl = document.createElement("div");
+    lbl.className = "slot-label";
+    lbl.textContent = PERIOD_SHORT[i];
+    div.appendChild(lbl);
+
+    // 教科エリア
+    const content = document.createElement("div");
+    content.className = "slot-content";
+
+    if (item) {
+      const em = document.createElement("span");
+      em.className = "slot-emoji";
+      em.textContent = item.emoji;
+      content.appendChild(em);
+
+      const tx = document.createElement("div");
+      const nm = document.createElement("div");
+      nm.className = "slot-name";
+      nm.style.color = item.color;
+      nm.textContent = item.label.replace(/\n/g," ");
+      tx.appendChild(nm);
+      if (item.sub) {
+        const sb = document.createElement("div");
+        sb.className = "slot-sub";
+        sb.style.color = item.color + "AA";
+        sb.textContent = item.sub;
+        tx.appendChild(sb);
+      }
+      content.appendChild(tx);
+    } else {
+      const hint = document.createElement("span");
+      hint.className = "slot-hint";
+      hint.textContent = (canReceive || canErase) ? "▶ ここ！" : "あいてるよ";
+      content.appendChild(hint);
+    }
+
+    div.appendChild(content);
+
+    if (canReceive || canErase) {
+      div.addEventListener("click", () => handlePeriodTap(i));
+    }
+
+    container.appendChild(div);
+  });
+}
+
+function renderPalette() {
+  const container = document.getElementById("palette");
+  container.innerHTML = "";
+
+  SUBJECTS.forEach(subject => {
+    const div = document.createElement("div");
+    div.className = "card" + (selected?.id === subject.id ? " selected" : "");
+    div.style.setProperty("--col", subject.color);
+    div.style.setProperty("--c40", subject.color + "40");
+    div.style.borderColor = selected?.id === subject.id ? subject.color : "#E0E8F0";
+    div.style.background  = selected?.id === subject.id ? subject.bg : "rgba(255,255,255,0.92)";
+
+    const em = document.createElement("span");
+    em.className = "card-emoji";
+    em.textContent = subject.emoji;
+    div.appendChild(em);
+
+    if (subject.sub) {
+      // 漢字＋ふりがな
+      const nm = document.createElement("div");
+      nm.className = "card-name";
+      nm.style.color = subject.color;
+      nm.textContent = subject.label;
+      div.appendChild(nm);
+      const sb = document.createElement("div");
+      sb.className = "card-sub";
+      sb.style.color = subject.color + "BB";
+      sb.textContent = subject.sub;
+      div.appendChild(sb);
+    } else {
+      // ひらがなのみ
+      const nm = document.createElement("div");
+      nm.className = "card-kana";
+      nm.style.color = subject.color;
+      nm.textContent = subject.label;
+      div.appendChild(nm);
+    }
+
+    div.addEventListener("click", () => handleSubjectTap(subject));
+    container.appendChild(div);
+  });
+}
+
+function renderBanner() {
+  const banner = document.getElementById("banner");
+  if (selected) {
+    banner.classList.add("ready");
+    if (selected.isClear) {
+      banner.textContent = "どのじかんを けす？";
+    } else {
+      const name = selected.label.replace(/\n/g," ");
+      banner.textContent = `👆「${name}」を なんじかんめに いれる？`;
+    }
+  } else {
+    banner.classList.remove("ready");
+    banner.textContent = "かもくカードを えらんでね";
+  }
+}
+
+// ── イベント ──────────────────────────────
+function handleSubjectTap(subject) {
+  selected = selected?.id === subject.id ? null : subject;
+  render();
+}
+
+function handlePeriodTap(index) {
+  if (!selected) return;
+  schedule[index] = selected.isClear ? null : selected;
+  selected = null;
+  render();
+}
+
+document.getElementById("btn-save").addEventListener("click", saveSchedule);
+document.getElementById("btn-reset").addEventListener("click", () => {
+  schedule = Array(6).fill(null);
+  selected = null;
+  render();
+});
+
+// ── 保存・読み込み ────────────────────────
+function saveSchedule() {
+  try {
+    const ids = schedule.map(s => s?.id || null);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+    showToast("saved");
+  } catch (_) {
+    showToast("error");
+  }
+}
+
+function loadSchedule() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const ids = JSON.parse(raw);
+    schedule = ids.map(id => id ? SUBJECTS.find(s => s.id === id) || null : null);
+    showToast("loaded");
+  } catch (_) {}
+}
+
+// ── トースト ──────────────────────────────
+function showToast(type) {
+  const el = document.getElementById("toast");
+  clearTimeout(toastTimer);
+  if (type === "saved")  { el.textContent = "💾 ほぞんしました！";      el.style.background = "#2ECC71"; }
+  if (type === "loaded") { el.textContent = "📂 よみこみました！";       el.style.background = "#2ECC71"; }
+  if (type === "error")  { el.textContent = "⚠️ ほぞんできませんでした"; el.style.background = "#E74C3C"; }
+  el.style.display = "block";
+  toastTimer = setTimeout(() => { el.style.display = "none"; }, 2000);
+}
+
+// ── 起動 ─────────────────────────────────
+loadSchedule();
+render();
+</script>
+</body>
+</html>

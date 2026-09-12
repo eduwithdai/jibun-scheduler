@@ -320,11 +320,17 @@ let toastTimer = null;
 const flat = s => s.kana.replace(/\n/g, "");
 
 // ── 読み上げ ──────────────────────────────
-// ブラウザ内蔵の音声合成を使う。ネットには一切つながない。
+// sounds/ の音声ファイルを鳴らす。ファイルが無い・読めないものは
+// ブラウザ内蔵の音声合成で代用する。どちらもネットにはつながない。
+const SOUND_DIR = "sounds/";
 const synth = window.speechSynthesis || null;
 let ttsOn   = true;   // 「おと」ボタンの状態
-let jaVoice = null;   // 日本語の声
-let readSeq = 0;      // 「よみあげ」の世代番号。途中で止めたら古い連鎖を捨てる。
+let jaVoice = null;   // 合成音声で使う日本語の声
+let sayGen  = 0;      // 世代番号。stopSpeak で進めて、古い連鎖を捨てる。
+let curAudio = null;  // いま鳴っている音声ファイル
+
+const audioCache  = {};        // ファイル名 → Audio
+const audioFailed = new Set(); // 読めなかったファイル名（以後は合成音声）
 
 function pickVoice() {
   if (!synth) return;
@@ -339,11 +345,78 @@ if (synth) {
   synth.addEventListener("voiceschanged", pickVoice);
 }
 
-// onEnd は読み終わり（失敗時も）に呼ぶ。つながらなかった時に固まらないようにする。
-function speak(text, onEnd) {
-  if (!synth || !ttsOn) { onEnd && onEnd(); return; }
-  let done = false;
-  const finish = () => { if (!done) { done = true; onEnd && onEnd(); } };
+// ── 読み上げの「ひとかたまり」 ──
+// file があれば音声ファイル、無ければ text を合成音声で読む。
+const partPeriod  = i => ({ file: `period${i + 1}.mp3`, text: PERIOD_SPEAK[i] + "は、" });
+const partSubject = s => ({ file: s.isClear ? null : `${s.id}.mp3`, text: flat(s) });
+
+const MSG = {
+  askErase:  { file:"ask_erase.mp3",  text:"けす。どのじかんを けす？" },
+  erased:    { file:"erased.mp3",     text:"けしたよ" },
+  readIntro: { file:"read_intro.mp3", text:"きょうの じかんわりだよ" },
+  empty:     { file:"empty.mp3",      text:"きょうの よていは まだ はいっていないよ" },
+  saved:     { file:"saved.mp3",      text:"ほぞんしたよ" },
+  reset:     { file:"reset.mp3",      text:"ぜんぶ けしたよ" },
+  soundOn:   { file:"sound_on.mp3",   text:"おとを つけたよ" },
+};
+
+// パーツを順番に鳴らす。onEnd は最後まで鳴り終わったときだけ呼ぶ。
+function say(parts, onEnd) {
+  if (!ttsOn) { onEnd && onEnd(); return; }
+  const gen = sayGen;
+  let k = 0;
+  const next = () => {
+    if (gen !== sayGen) return;              // 途中で止められた
+    if (k >= parts.length) { onEnd && onEnd(); return; }
+    playPart(parts[k++], gen, next);
+  };
+  next();
+}
+
+function playPart(part, gen, done) {
+  if (!part.file || audioFailed.has(part.file)) { speakText(part.text, gen, done); return; }
+
+  let a = audioCache[part.file];
+  if (!a) {
+    a = new Audio(SOUND_DIR + part.file);
+    a.preload = "auto";
+    audioCache[part.file] = a;
+  }
+  curAudio = a;
+
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    if (curAudio === a) curAudio = null;
+    if (gen === sayGen) done();
+  };
+  // 鳴らせなかったとき。ただし stopSpeak で止めた場合はここを通っても
+  // 「壊れている」とは見なさない（gen がずれているので判別できる）。
+  const fail = () => {
+    if (settled) return;
+    settled = true;
+    if (curAudio === a) curAudio = null;
+    if (gen !== sayGen) return;
+    audioFailed.add(part.file);
+    speakText(part.text, gen, done);
+  };
+
+  a.onended = finish;
+  a.onerror = fail;
+  try { a.currentTime = 0; } catch (_) {}
+  const p = a.play();
+  if (p && p.catch) p.catch(fail);
+}
+
+function speakText(text, gen, done) {
+  if (!synth) { if (gen === sayGen) done(); return; }
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    if (gen === sayGen) done();
+  };
   try {
     const u = new SpeechSynthesisUtterance(text);
     u.lang  = "ja-JP";
@@ -358,12 +431,16 @@ function speak(text, onEnd) {
   }
 }
 
-// 今しゃべっているものを止める（連鎖読み上げも打ち切る）
+// 今鳴っているものを止める（連鎖読み上げも打ち切る）
 function stopSpeak() {
-  readSeq++;
+  sayGen++;
+  if (curAudio) {
+    try { curAudio.pause(); curAudio.currentTime = 0; } catch (_) {}
+    curAudio = null;
+  }
+  if (synth) { try { synth.cancel(); } catch (_) {} }
   clearSpeakingMark();
   setReadingUI(false);
-  if (synth) { try { synth.cancel(); } catch (_) {} }
 }
 
 function markSpeaking(i) {
@@ -384,32 +461,32 @@ function setReadingUI(reading) {
 
 // 時間割をぜんぶ順番に読む
 function readAll() {
-  if (!synth || !ttsOn) return;
+  if (!ttsOn) return;
   stopSpeak();
-  const mySeq = readSeq;
+  const gen = sayGen;
 
   const items = [];
-  schedule.forEach((it, i) => { if (it) items.push({ i, text: `${PERIOD_SPEAK[i]}は、${flat(it)}` }); });
+  schedule.forEach((it, i) => { if (it) items.push({ i, it }); });
 
   if (items.length === 0) {
-    speak("きょうの よていは まだ はいっていないよ");
+    say([MSG.empty]);
     return;
   }
 
   setReadingUI(true);
   let k = 0;
   const step = () => {
-    if (mySeq !== readSeq) return;          // 途中で止められた
+    if (gen !== sayGen) return;             // 途中で止められた
     if (k >= items.length) {                // 読み終わり
       clearSpeakingMark();
       setReadingUI(false);
       return;
     }
-    const { i, text } = items[k++];
+    const { i, it } = items[k++];
     markSpeaking(i);
-    speak(text, step);
+    say([partPeriod(i), partSubject(it)], step);
   };
-  speak("きょうの じかんわりだよ", step);
+  say([MSG.readIntro], step);
 }
 
 function applyTtsUI() {
@@ -494,7 +571,7 @@ function renderSlots() {
       div.addEventListener("click", () => {
         stopSpeak();
         markSpeaking(i);
-        speak(`${PERIOD_SPEAK[i]}は、${flat(item)}`, clearSpeakingMark);
+        say([partPeriod(i), partSubject(item)], clearSpeakingMark);
       });
     }
 
@@ -575,7 +652,7 @@ function handleSubjectTap(subject) {
 
   stopSpeak();
   if (selected) {
-    speak(selected.isClear ? "けす。どのじかんを けす？" : flat(selected));
+    say([selected.isClear ? MSG.askErase : partSubject(selected)]);
   }
 }
 
@@ -588,9 +665,12 @@ function handlePeriodTap(index) {
   render();
 
   stopSpeak();
-  speak(erasing
-    ? `${PERIOD_SPEAK[index]}を けしたよ`
-    : `${PERIOD_SPEAK[index]}は、${flat(placed)}`);
+  // 消したときは「けしたよ」だけ。時限を言わせたい場合は
+  // sounds/period1_wo.mp3 …（「いちじかんめを」）を用意して
+  // ここに partPeriodWo(index) を足す。
+  say(erasing
+    ? [MSG.erased]
+    : [partPeriod(index), partSubject(placed)]);
 }
 
 document.getElementById("btn-save").addEventListener("click", saveSchedule);
@@ -599,7 +679,7 @@ document.getElementById("btn-reset").addEventListener("click", () => {
   selected = null;
   render();
   stopSpeak();
-  speak("ぜんぶ けしたよ");
+  say([MSG.reset]);
 });
 
 // 「よみあげ」— 読み上げ中にもう一度押したら止める
@@ -614,7 +694,7 @@ document.getElementById("btn-sound").addEventListener("click", () => {
   ttsOn = !ttsOn;
   saveTts();
   applyTtsUI();
-  if (ttsOn) speak("おとを つけたよ");
+  if (ttsOn) say([MSG.soundOn]);
   else stopSpeak();
 });
 
@@ -625,7 +705,7 @@ function saveSchedule() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
     showToast("saved");
     stopSpeak();
-    speak("ほぞんしたよ");
+    say([MSG.saved]);
   } catch (_) {
     showToast("error");
   }
@@ -654,13 +734,7 @@ function showToast(type) {
 
 // ── 起動 ─────────────────────────────────
 loadTts();
-// 音声合成が使えないブラウザでは、読み上げのボタンを出さない
-if (!synth) {
-  document.getElementById("btn-read").hidden  = true;
-  document.getElementById("btn-sound").hidden = true;
-} else {
-  applyTtsUI();
-}
+applyTtsUI();   // 音声ファイルで鳴らすので、合成音声が無いブラウザでもボタンは出す
 loadSchedule();
 render();
 </script>

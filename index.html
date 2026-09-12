@@ -62,7 +62,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    min-width: 72px;
+    min-width: 64px;
     min-height: 52px;
     border-radius: 16px;
     border-width: 3px;
@@ -70,13 +70,20 @@
     cursor: pointer;
     font-weight: bold;
     gap: 1px;
-    padding: 4px 8px;
+    padding: 4px 6px;
     flex-shrink: 0;
   }
   .hdr-btn .ico { font-size: 22px; }
-  .hdr-btn .lbl { font-size: 13px; }
+  .hdr-btn .lbl { font-size: 13px; white-space: nowrap; }
   #btn-save  { background:#EBF5FB; border-color:#AED6F1; color:#2471A3; }
   #btn-reset { background:#FDEDEC; border-color:#F5B7B1; color:#C0392B; }
+  #btn-read  { background:#E8F8F5; border-color:#A3E4D7; color:#117A65; }
+  #btn-sound { background:#FEF9E7; border-color:#F7DC6F; color:#9A7D0A; }
+  /* 音がオフのとき／読み上げ中に押せないとき */
+  .hdr-btn.off      { background:#F4F6F7; border-color:#D5D8DC; color:#98A3A8; }
+  .hdr-btn[disabled] { opacity: 0.4; cursor: default; }
+  /* 読み上げ中のボタン */
+  #btn-read.speaking { background:#16A085; border-color:#0E6655; color:#fff; }
 
   /* ── メインエリア ── */
   #main {
@@ -126,6 +133,12 @@
   }
   .slot.filled {
     box-shadow: 0 2px 6px rgba(0,0,0,0.07);
+  }
+  /* いま読み上げているコマ */
+  .slot.speaking {
+    outline: 5px solid #16A085;
+    outline-offset: 2px;
+    transform: scale(1.03);
   }
 
   /* 「1じかん」— 大きく・濃く */
@@ -254,6 +267,12 @@
 <div id="header">
   <div id="title">📅 じかんわり</div>
   <div id="banner">かもくカードを えらんでね</div>
+  <button class="hdr-btn" id="btn-read">
+    <span class="ico">📢</span><span class="lbl">よみあげ</span>
+  </button>
+  <button class="hdr-btn" id="btn-sound" aria-pressed="true">
+    <span class="ico">🔊</span><span class="lbl">おと</span>
+  </button>
   <button class="hdr-btn" id="btn-save">
     <span class="ico">💾</span><span class="lbl">ほぞん</span>
   </button>
@@ -289,13 +308,130 @@ const SUBJECTS = [
 ];
 
 const PERIOD_SHORT = ["1じかん","2じかん","3じかん","4じかん","5じかん","6じかん"];
+// 読み上げ用。「4じかんめ」は「よじかんめ」と読ませたいので、かなで持つ。
+const PERIOD_SPEAK = ["いちじかんめ","にじかんめ","さんじかんめ","よじかんめ","ごじかんめ","ろくじかんめ"];
 const STORAGE_KEY  = "jikanwari_schedule";
+const TTS_KEY      = "jikanwari_tts";
 
 let schedule = Array(6).fill(null); // 各コマに入った subject or null
 let selected  = null;               // 選択中の subject or null
 let toastTimer = null;
 
 const flat = s => s.kana.replace(/\n/g, "");
+
+// ── 読み上げ ──────────────────────────────
+// ブラウザ内蔵の音声合成を使う。ネットには一切つながない。
+const synth = window.speechSynthesis || null;
+let ttsOn   = true;   // 「おと」ボタンの状態
+let jaVoice = null;   // 日本語の声
+let readSeq = 0;      // 「よみあげ」の世代番号。途中で止めたら古い連鎖を捨てる。
+
+function pickVoice() {
+  if (!synth) return;
+  const vs = synth.getVoices();
+  jaVoice = vs.find(v => v.lang === "ja-JP")
+         || vs.find(v => (v.lang || "").toLowerCase().startsWith("ja"))
+         || null;
+}
+if (synth) {
+  pickVoice();
+  // 声の一覧は非同期で届くブラウザがある
+  synth.addEventListener("voiceschanged", pickVoice);
+}
+
+// onEnd は読み終わり（失敗時も）に呼ぶ。つながらなかった時に固まらないようにする。
+function speak(text, onEnd) {
+  if (!synth || !ttsOn) { onEnd && onEnd(); return; }
+  let done = false;
+  const finish = () => { if (!done) { done = true; onEnd && onEnd(); } };
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang  = "ja-JP";
+    if (jaVoice) u.voice = jaVoice;
+    u.rate  = 0.95;  // こども向けに少しゆっくり
+    u.pitch = 1.05;
+    u.onend = finish;
+    u.onerror = finish;
+    synth.speak(u);
+  } catch (_) {
+    finish();
+  }
+}
+
+// 今しゃべっているものを止める（連鎖読み上げも打ち切る）
+function stopSpeak() {
+  readSeq++;
+  clearSpeakingMark();
+  setReadingUI(false);
+  if (synth) { try { synth.cancel(); } catch (_) {} }
+}
+
+function markSpeaking(i) {
+  clearSpeakingMark();
+  const el = document.querySelectorAll("#slots .slot")[i];
+  if (el) el.classList.add("speaking");
+}
+
+function clearSpeakingMark() {
+  document.querySelectorAll("#slots .slot.speaking")
+    .forEach(el => el.classList.remove("speaking"));
+}
+
+function setReadingUI(reading) {
+  const btn = document.getElementById("btn-read");
+  if (btn) btn.classList.toggle("speaking", reading);
+}
+
+// 時間割をぜんぶ順番に読む
+function readAll() {
+  if (!synth || !ttsOn) return;
+  stopSpeak();
+  const mySeq = readSeq;
+
+  const items = [];
+  schedule.forEach((it, i) => { if (it) items.push({ i, text: `${PERIOD_SPEAK[i]}は、${flat(it)}` }); });
+
+  if (items.length === 0) {
+    speak("きょうの よていは まだ はいっていないよ");
+    return;
+  }
+
+  setReadingUI(true);
+  let k = 0;
+  const step = () => {
+    if (mySeq !== readSeq) return;          // 途中で止められた
+    if (k >= items.length) {                // 読み終わり
+      clearSpeakingMark();
+      setReadingUI(false);
+      return;
+    }
+    const { i, text } = items[k++];
+    markSpeaking(i);
+    speak(text, step);
+  };
+  speak("きょうの じかんわりだよ", step);
+}
+
+function applyTtsUI() {
+  const btn = document.getElementById("btn-sound");
+  if (!btn) return;
+  btn.classList.toggle("off", !ttsOn);
+  btn.setAttribute("aria-pressed", String(ttsOn));
+  btn.querySelector(".ico").textContent = ttsOn ? "🔊" : "🔇";
+  // 音がオフのあいだは「よみあげ」も押せない
+  document.getElementById("btn-read").disabled = !ttsOn;
+}
+
+function loadTts() {
+  try {
+    const raw = localStorage.getItem(TTS_KEY);
+    if (raw !== null) ttsOn = raw === "1";
+  } catch (_) {}
+}
+
+function saveTts() {
+  try { localStorage.setItem(TTS_KEY, ttsOn ? "1" : "0"); } catch (_) {}
+}
 
 // ── 描画 ─────────────────────────────────
 function render() {
@@ -352,6 +488,14 @@ function renderSlots() {
 
     if (canReceive || canErase) {
       div.addEventListener("click", () => handlePeriodTap(i));
+    } else if (item) {
+      // カードを選んでいないときは、タップでそのコマだけ聞きなおせる
+      div.style.cursor = "pointer";
+      div.addEventListener("click", () => {
+        stopSpeak();
+        markSpeaking(i);
+        speak(`${PERIOD_SPEAK[i]}は、${flat(item)}`, clearSpeakingMark);
+      });
     }
 
     container.appendChild(div);
@@ -425,15 +569,28 @@ function renderBanner() {
 
 // ── イベント ──────────────────────────────
 function handleSubjectTap(subject) {
-  selected = selected?.id === subject.id ? null : subject;
+  const wasSelected = selected?.id === subject.id;
+  selected = wasSelected ? null : subject;
   render();
+
+  stopSpeak();
+  if (selected) {
+    speak(selected.isClear ? "けす。どのじかんを けす？" : flat(selected));
+  }
 }
 
 function handlePeriodTap(index) {
   if (!selected) return;
-  schedule[index] = selected.isClear ? null : selected;
+  const erasing = selected.isClear;
+  schedule[index] = erasing ? null : selected;
+  const placed = selected;
   selected = null;
   render();
+
+  stopSpeak();
+  speak(erasing
+    ? `${PERIOD_SPEAK[index]}を けしたよ`
+    : `${PERIOD_SPEAK[index]}は、${flat(placed)}`);
 }
 
 document.getElementById("btn-save").addEventListener("click", saveSchedule);
@@ -441,6 +598,24 @@ document.getElementById("btn-reset").addEventListener("click", () => {
   schedule = Array(6).fill(null);
   selected = null;
   render();
+  stopSpeak();
+  speak("ぜんぶ けしたよ");
+});
+
+// 「よみあげ」— 読み上げ中にもう一度押したら止める
+document.getElementById("btn-read").addEventListener("click", () => {
+  const reading = document.getElementById("btn-read").classList.contains("speaking");
+  if (reading) { stopSpeak(); return; }
+  readAll();
+});
+
+// 「おと」— 読み上げのオン／オフ
+document.getElementById("btn-sound").addEventListener("click", () => {
+  ttsOn = !ttsOn;
+  saveTts();
+  applyTtsUI();
+  if (ttsOn) speak("おとを つけたよ");
+  else stopSpeak();
 });
 
 // ── 保存・読み込み ────────────────────────
@@ -449,6 +624,8 @@ function saveSchedule() {
     const ids = schedule.map(s => s?.id || null);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
     showToast("saved");
+    stopSpeak();
+    speak("ほぞんしたよ");
   } catch (_) {
     showToast("error");
   }
@@ -476,6 +653,14 @@ function showToast(type) {
 }
 
 // ── 起動 ─────────────────────────────────
+loadTts();
+// 音声合成が使えないブラウザでは、読み上げのボタンを出さない
+if (!synth) {
+  document.getElementById("btn-read").hidden  = true;
+  document.getElementById("btn-sound").hidden = true;
+} else {
+  applyTtsUI();
+}
 loadSchedule();
 render();
 </script>

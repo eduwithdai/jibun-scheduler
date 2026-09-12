@@ -358,6 +358,7 @@ const MSG = {
   saved:     { file:"saved.mp3",      text:"ほぞんしたよ" },
   reset:     { file:"reset.mp3",      text:"ぜんぶ けしたよ" },
   soundOn:   { file:"sound_on.mp3",   text:"おとを つけたよ" },
+  cheer:     { file:"today.mp3",      text:"きょうも いちにち がんばろう" },
 };
 
 // パーツを順番に鳴らす。onEnd は最後まで鳴り終わったときだけ呼ぶ。
@@ -477,9 +478,9 @@ function readAll() {
   let k = 0;
   const step = () => {
     if (gen !== sayGen) return;             // 途中で止められた
-    if (k >= items.length) {                // 読み終わり
+    if (k >= items.length) {                // 読み終わり → 最後にひとこと
       clearSpeakingMark();
-      setReadingUI(false);
+      say([MSG.cheer], () => setReadingUI(false));
       return;
     }
     const { i, it } = items[k++];

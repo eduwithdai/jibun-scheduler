@@ -85,6 +85,25 @@
   /* 読み上げ中のボタン */
   #btn-read.speaking { background:#16A085; border-color:#0E6655; color:#fff; }
 
+  /* せってい（長押しで開く）。押している間だけ色が伸びて、進み具合が見える。 */
+  #btn-settings {
+    background:#F4ECF7; border-color:#D2B4DE; color:#6C3483;
+    position: relative;
+    overflow: hidden;
+  }
+  #btn-settings::after {
+    content: "";
+    position: absolute;
+    left: 0; bottom: 0;
+    width: 0; height: 100%;
+    background: #BB8FCE66;
+  }
+  #btn-settings.holding::after {
+    width: 100%;
+    transition: width 0.8s linear;
+  }
+  #btn-settings .ico, #btn-settings .lbl { position: relative; z-index: 1; }
+
   /* ── メインエリア ── */
   #main {
     display: flex;
@@ -254,11 +273,118 @@
     padding: 12px 32px;
     border-radius: 36px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-    z-index: 100;
+    z-index: 300;   /* せってい画面より手前 */
     pointer-events: none;
     display: none;
     white-space: nowrap;
   }
+
+  /* ── せってい画面 ── */
+  #settings {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(0,0,0,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+  }
+  #settings[hidden] { display: none !important; }
+
+  #settings-box {
+    width: min(920px, 100%);
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: #FFFDF8;
+    border: 4px solid #D2B4DE;
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  }
+
+  .st-head, .st-foot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: #F4ECF7;
+    flex-shrink: 0;
+  }
+  .st-head { border-bottom: 2px solid #E8DAEF; }
+  .st-foot { border-top: 2px solid #E8DAEF; }
+  .st-title { font-size: 19px; font-weight: bold; color: #6C3483; flex: 1; }
+  .st-note  { font-size: 12px; color: #7F8C8D; flex: 1; line-height: 1.4; }
+
+  #settings-list {
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .st-row {
+    display: grid;
+    grid-template-columns: 40px 68px minmax(104px, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    border: 2px solid #E8E0EF;
+    border-radius: 14px;
+    background: #fff;
+  }
+
+  .st-ord { display: flex; flex-direction: column; gap: 3px; }
+  .st-ord .st-btn { padding: 4px 0; width: 36px; }
+
+  .st-thumb {
+    height: 58px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .st-img   { max-height: 58px; max-width: 68px; object-fit: contain; }
+  .st-emoji { font-size: 30px; }
+
+  .st-kana {
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: bold;
+    line-height: 1.25;
+    border: 2px solid #D5D8DC;
+    border-radius: 10px;
+    padding: 5px 7px;
+    resize: none;
+    height: 58px;
+    width: 100%;
+  }
+  .st-kana:focus { outline: 3px solid #D2B4DE; border-color: #BB8FCE; }
+
+  .st-acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    justify-content: flex-end;
+  }
+
+  .st-btn {
+    font-family: inherit;
+    font-weight: bold;
+    font-size: 13px;
+    border: 2px solid #AED6F1;
+    background: #EBF5FB;
+    color: #21618C;
+    border-radius: 10px;
+    padding: 7px 9px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .st-btn:disabled { opacity: 0.3; cursor: default; }
+  /* そのカードに自前の絵／音が入っているとき */
+  .st-btn.has  { border-color:#A3E4D7; background:#E8F8F5; color:#117A65; }
+  .st-btn.warn { border-color:#F5B7B1; background:#FDEDEC; color:#C0392B; }
 </style>
 </head>
 <body>
@@ -279,6 +405,10 @@
   <button class="hdr-btn" id="btn-reset">
     <span class="ico">🔄</span><span class="lbl">リセット</span>
   </button>
+  <!-- こどもが さわっても すぐ開かないように、長押しでだけ開く -->
+  <button class="hdr-btn" id="btn-settings" title="ながおしで ひらきます">
+    <span class="ico">⚙️</span><span class="lbl">せってい</span>
+  </button>
 </div>
 
 <!-- メイン -->
@@ -289,6 +419,24 @@
 
 <!-- トースト -->
 <div id="toast"></div>
+
+<!-- せってい画面（かもくカードの ならびかえ・もじ・え・おと） -->
+<div id="settings" hidden>
+  <div id="settings-box">
+    <div class="st-head">
+      <div class="st-title">⚙️ かもくカードの せってい</div>
+      <button class="st-btn" id="btn-settings-close">とじる</button>
+    </div>
+    <div id="settings-list"></div>
+    <div class="st-foot">
+      <div class="st-note">
+        へんこうは この タブレット（ブラウザ）だけに のこります。<br>
+        もじの 2ぎょうめは、ますの なかで かいぎょう すると つくれます。
+      </div>
+      <button class="st-btn warn" id="btn-settings-reset">ぜんぶ もとにもどす</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // kana は画面に出すひらがなの教科名（改行は \n）。img があれば絵、なければ emoji を使う。
@@ -312,12 +460,122 @@ const PERIOD_SHORT = ["1じかん","2じかん","3じかん","4じかん","5じ�
 const PERIOD_SPEAK = ["いちじかんめ","にじかんめ","さんじかんめ","よじかんめ","ごじかんめ","ろくじかんめ"];
 const STORAGE_KEY  = "jikanwari_schedule";
 const TTS_KEY      = "jikanwari_tts";
+const CARDS_KEY    = "jikanwari_cards";
 
 let schedule = Array(6).fill(null); // 各コマに入った subject or null
 let selected  = null;               // 選択中の subject or null
 let toastTimer = null;
 
 const flat = s => s.kana.replace(/\n/g, "");
+
+// ── カードの せってい ────────────────────
+// もじと ならび順は localStorage に。絵と音は大きいので IndexedDB に
+// Blob のまま入れる（localStorage だと容量が足りなくなる）。
+const DEFAULT_KANA = {};
+SUBJECTS.forEach(s => { DEFAULT_KANA[s.id] = s.kana; });
+
+let cardConf  = {};    // id → { kana }
+let cardOrder = null;  // [id, …]。null なら もとの順番
+let customImg = {};    // id → ObjectURL（自前の絵）
+let customSnd = {};    // id → ObjectURL（自前の音）
+
+// 絵と音の「どれを使うか」は、ここだけで決める
+const imgSrc   = s => customImg[s.id] || s.img || null;
+const soundSrc = s => customSnd[s.id] || (s.isClear ? null : SOUND_DIR + s.id + ".mp3");
+
+// けすカードは いつも いちばん最後。それ以外を cardOrder の順に並べる。
+function orderedSubjects() {
+  const real  = SUBJECTS.filter(s => !s.isClear);
+  const clear = SUBJECTS.filter(s =>  s.isClear);
+  if (!cardOrder) return [...real, ...clear];
+  const known = cardOrder.map(id => real.find(s => s.id === id)).filter(Boolean);
+  const rest  = real.filter(s => !cardOrder.includes(s.id));  // あとから増えた分
+  return [...known, ...rest, ...clear];
+}
+
+function applyCardConf() {
+  SUBJECTS.forEach(s => {
+    const k = cardConf[s.id] && cardConf[s.id].kana;
+    s.kana = (k && k.trim()) ? k : DEFAULT_KANA[s.id];
+  });
+}
+
+function saveCards() {
+  try {
+    localStorage.setItem(CARDS_KEY, JSON.stringify({ order: cardOrder, conf: cardConf }));
+  } catch (_) {
+    showToast("error");
+  }
+}
+
+function loadCards() {
+  try {
+    const raw = localStorage.getItem(CARDS_KEY);
+    if (!raw) return;
+    const o = JSON.parse(raw);
+    if (Array.isArray(o.order)) cardOrder = o.order;
+    if (o.conf && typeof o.conf === "object") cardConf = o.conf;
+    applyCardConf();
+  } catch (_) {}
+}
+
+// ── IndexedDB（絵と音の入れもの） ──────────
+const DB_NAME = "jikanwari", DB_STORE = "media";
+let dbPromise = null;
+
+function openDB() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((res, rej) => {
+    if (!window.indexedDB) { rej(new Error("IndexedDB なし")); return; }
+    const r = indexedDB.open(DB_NAME, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(DB_STORE);
+    r.onsuccess = () => res(r.result);
+    r.onerror   = () => rej(r.error);
+  });
+  return dbPromise;
+}
+
+function dbTx(mode, fn) {
+  return openDB().then(db => new Promise((res, rej) => {
+    const tx  = db.transaction(DB_STORE, mode);
+    const req = fn(tx.objectStore(DB_STORE));
+    tx.oncomplete = () => res(req ? req.result : undefined);
+    tx.onerror    = () => rej(tx.error);
+    tx.onabort    = () => rej(tx.error);
+  }));
+}
+
+const mediaGet  = k      => dbTx("readonly",  st => st.get(k));
+const mediaSet  = (k, v) => dbTx("readwrite", st => st.put(v, k));
+const mediaDel  = k      => dbTx("readwrite", st => st.delete(k));
+const mediaKeys = ()     => dbTx("readonly",  st => st.getAllKeys());
+
+// 保存してある絵と音を読み出して ObjectURL にする。
+// キーは "img:<id>" / "snd:<id>"。
+async function loadCustomMedia() {
+  let keys;
+  try { keys = await mediaKeys(); } catch (_) { return; }
+  for (const key of keys) {
+    try {
+      const blob = await mediaGet(key);
+      if (!blob) continue;
+      const kind = key.slice(0, 3), id = key.slice(4);
+      const url = URL.createObjectURL(blob);
+      if (kind === "img") customImg[id] = url;
+      if (kind === "snd") customSnd[id] = url;
+    } catch (_) {}
+  }
+}
+
+// 差し替え前の ObjectURL と、その Audio を捨てる
+function dropMediaUrl(map, id) {
+  const old = map[id];
+  if (!old) return;
+  URL.revokeObjectURL(old);
+  delete audioCache[old];
+  audioFailed.delete(old);
+  delete map[id];
+}
 
 // ── 読み上げ ──────────────────────────────
 // sounds/ の音声ファイルを鳴らす。ファイルが無い・読めないものは
@@ -329,8 +587,8 @@ let jaVoice = null;   // 合成音声で使う日本語の声
 let sayGen  = 0;      // 世代番号。stopSpeak で進めて、古い連鎖を捨てる。
 let curAudio = null;  // いま鳴っている音声ファイル
 
-const audioCache  = {};        // ファイル名 → Audio
-const audioFailed = new Set(); // 読めなかったファイル名（以後は合成音声）
+const audioCache  = {};        // src → Audio
+const audioFailed = new Set(); // 読めなかった src（以後は合成音声）
 
 function pickVoice() {
   if (!synth) return;
@@ -346,19 +604,22 @@ if (synth) {
 }
 
 // ── 読み上げの「ひとかたまり」 ──
-// file があれば音声ファイル、無ければ text を合成音声で読む。
-const partPeriod  = i => ({ file: `period${i + 1}.mp3`, text: PERIOD_SPEAK[i] + "は、" });
-const partSubject = s => ({ file: s.isClear ? null : `${s.id}.mp3`, text: flat(s) });
+// src があれば音声ファイル、無ければ text を合成音声で読む。
+// 教科の音は、せっていで入れ替えたものがあれば そちらを使う。
+const msg = (file, text) => ({ src: SOUND_DIR + file, text });
+
+const partPeriod  = i => ({ src: SOUND_DIR + `period${i + 1}.mp3`, text: PERIOD_SPEAK[i] + "は、" });
+const partSubject = s => ({ src: soundSrc(s), text: flat(s) });
 
 const MSG = {
-  askErase:  { file:"ask_erase.mp3",  text:"けす。どのじかんを けす？" },
-  erased:    { file:"erased.mp3",     text:"けしたよ" },
-  readIntro: { file:"read_intro.mp3", text:"きょうの じかんわりだよ" },
-  empty:     { file:"empty.mp3",      text:"きょうの よていは まだ はいっていないよ" },
-  saved:     { file:"saved.mp3",      text:"ほぞんしたよ" },
-  reset:     { file:"reset.mp3",      text:"ぜんぶ けしたよ" },
-  soundOn:   { file:"sound_on.mp3",   text:"おとを つけたよ" },
-  cheer:     { file:"today.mp3",      text:"きょうも いちにち がんばろう" },
+  askErase:  msg("ask_erase.mp3",  "けす。どのじかんを けす？"),
+  erased:    msg("erased.mp3",     "けしたよ"),
+  readIntro: msg("read_intro.mp3", "きょうの じかんわりだよ"),
+  empty:     msg("empty.mp3",      "きょうの よていは まだ はいっていないよ"),
+  saved:     msg("saved.mp3",      "ほぞんしたよ"),
+  reset:     msg("reset.mp3",      "ぜんぶ けしたよ"),
+  soundOn:   msg("sound_on.mp3",   "おとを つけたよ"),
+  cheer:     msg("today.mp3",      "きょうも いちにち がんばろう"),
 };
 
 // パーツを順番に鳴らす。onEnd は最後まで鳴り終わったときだけ呼ぶ。
@@ -375,13 +636,13 @@ function say(parts, onEnd) {
 }
 
 function playPart(part, gen, done) {
-  if (!part.file || audioFailed.has(part.file)) { speakText(part.text, gen, done); return; }
+  if (!part.src || audioFailed.has(part.src)) { speakText(part.text, gen, done); return; }
 
-  let a = audioCache[part.file];
+  let a = audioCache[part.src];
   if (!a) {
-    a = new Audio(SOUND_DIR + part.file);
+    a = new Audio(part.src);
     a.preload = "auto";
-    audioCache[part.file] = a;
+    audioCache[part.src] = a;
   }
   curAudio = a;
 
@@ -399,7 +660,7 @@ function playPart(part, gen, done) {
     settled = true;
     if (curAudio === a) curAudio = null;
     if (gen !== sayGen) return;
-    audioFailed.add(part.file);
+    audioFailed.add(part.src);
     speakText(part.text, gen, done);
   };
 
@@ -581,11 +842,16 @@ function renderSlots() {
 }
 
 // 教科の絵（画像）。画像がない／読み込めないときは絵文字にフォールバックする。
+// where は "slot"（コマ）／"st"（せってい画面）／それ以外（カード）。
+const IMG_CLASS   = { slot:"slot-img",   st:"st-img"   };
+const EMOJI_CLASS = { slot:"slot-emoji", st:"st-emoji" };
+
 function makeVisual(subject, where) {
-  if (subject.img) {
+  const src = imgSrc(subject);
+  if (src) {
     const im = document.createElement("img");
-    im.className = where === "slot" ? "slot-img" : "card-img";
-    im.src = subject.img;
+    im.className = IMG_CLASS[where] || "card-img";
+    im.src = src;
     im.alt = flat(subject);
     im.draggable = false;
     im.addEventListener("error", () => {
@@ -598,7 +864,7 @@ function makeVisual(subject, where) {
 
 function makeEmoji(subject, where) {
   const em = document.createElement("span");
-  em.className = where === "slot" ? "slot-emoji" : "card-emoji";
+  em.className = EMOJI_CLASS[where] || "card-emoji";
   em.textContent = subject.emoji || "❓";
   return em;
 }
@@ -607,7 +873,7 @@ function renderPalette() {
   const container = document.getElementById("palette");
   container.innerHTML = "";
 
-  SUBJECTS.forEach(subject => {
+  orderedSubjects().forEach(subject => {
     const div = document.createElement("div");
     div.className = "card" + (selected?.id === subject.id ? " selected" : "");
     div.style.setProperty("--col", subject.color);
@@ -699,6 +965,203 @@ document.getElementById("btn-sound").addEventListener("click", () => {
   else stopSpeak();
 });
 
+// ── せってい（長押しで開く） ───────────────
+const stBtn = document.getElementById("btn-settings");
+const HOLD_MS = 800;
+let holdTimer = null;
+let holdFired = false;   // 長押しで開いた直後の click を捨てるための印
+
+function holdStart() {
+  if (holdTimer) return;
+  holdFired = false;
+  stBtn.classList.add("holding");
+  holdTimer = setTimeout(() => {
+    holdTimer = null;
+    holdFired = true;
+    stBtn.classList.remove("holding");
+    openSettings();
+  }, HOLD_MS);
+}
+
+function holdCancel() {
+  if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+  stBtn.classList.remove("holding");
+}
+
+stBtn.addEventListener("pointerdown", holdStart);
+["pointerup", "pointerleave", "pointercancel"].forEach(ev =>
+  stBtn.addEventListener(ev, holdCancel));
+// 長押し中に選択メニューが出ないように
+stBtn.addEventListener("contextmenu", e => e.preventDefault());
+// 短く押しただけのときは、開かずに使いかたを出す
+stBtn.addEventListener("click", () => {
+  if (holdFired) { holdFired = false; return; }
+  showToast("hold");
+});
+
+document.getElementById("btn-settings-close").addEventListener("click", closeSettings);
+document.getElementById("btn-settings-reset").addEventListener("click", () => {
+  if (!confirm("かもくカードの もじ・え・おと・ならびじゅんを\nぜんぶ もとに もどします。よろしいですか？")) return;
+  resetAllCards();
+});
+document.getElementById("settings").addEventListener("click", e => {
+  if (e.target.id === "settings") closeSettings();   // 外側を押したら閉じる
+});
+
+function openSettings() {
+  stopSpeak();
+  selected = null;
+  render();
+  renderSettings();
+  document.getElementById("settings").hidden = false;
+}
+
+function closeSettings() {
+  stopSpeak();
+  document.getElementById("settings").hidden = true;
+  render();
+}
+
+function stBtnEl(label, cls) {
+  const b = document.createElement("button");
+  b.className = "st-btn" + (cls ? " " + cls : "");
+  b.type = "button";
+  b.textContent = label;
+  return b;
+}
+
+function renderSettings() {
+  const list = document.getElementById("settings-list");
+  list.innerHTML = "";
+
+  const subs = orderedSubjects().filter(s => !s.isClear);
+
+  subs.forEach((s, idx) => {
+    const row = document.createElement("div");
+    row.className = "st-row";
+
+    // ── ならびかえ ──
+    const ord = document.createElement("div");
+    ord.className = "st-ord";
+    const up = stBtnEl("▲"), dn = stBtnEl("▼");
+    up.disabled = idx === 0;
+    dn.disabled = idx === subs.length - 1;
+    up.title = "うえへ";
+    dn.title = "したへ";
+    up.addEventListener("click", () => moveCard(s.id, -1));
+    dn.addEventListener("click", () => moveCard(s.id, +1));
+    ord.append(up, dn);
+
+    // ── 絵 ──
+    const thumb = document.createElement("div");
+    thumb.className = "st-thumb";
+    thumb.appendChild(makeVisual(s, "st"));
+
+    // ── もじ（かいぎょうで2ぎょうにできる） ──
+    const ta = document.createElement("textarea");
+    ta.className = "st-kana";
+    ta.rows = 2;
+    ta.value = s.kana;
+    ta.setAttribute("aria-label", "かもくの なまえ");
+    ta.addEventListener("input", () => {
+      const v = ta.value.replace(/\r/g, "");
+      if (!v.trim() || v === DEFAULT_KANA[s.id]) delete cardConf[s.id];
+      else cardConf[s.id] = { kana: v };
+      applyCardConf();
+      saveCards();
+      render();   // パレットとコマにすぐ反映（せってい画面は作り直さない）
+    });
+
+    // ── そうさボタン ──
+    const acts = document.createElement("div");
+    acts.className = "st-acts";
+
+    const fImg = document.createElement("input");
+    fImg.type = "file"; fImg.accept = "image/*"; fImg.hidden = true;
+    fImg.addEventListener("change", () => {
+      if (fImg.files[0]) setCardMedia(s.id, "img", fImg.files[0]);
+      fImg.value = "";
+    });
+    const bImg = stBtnEl(customImg[s.id] ? "🖼 え ✓" : "🖼 え", customImg[s.id] ? "has" : "");
+    bImg.addEventListener("click", () => fImg.click());
+
+    const fSnd = document.createElement("input");
+    fSnd.type = "file"; fSnd.accept = "audio/*"; fSnd.hidden = true;
+    fSnd.addEventListener("change", () => {
+      if (fSnd.files[0]) setCardMedia(s.id, "snd", fSnd.files[0]);
+      fSnd.value = "";
+    });
+    const bSnd = stBtnEl(customSnd[s.id] ? "🔊 おと ✓" : "🔊 おと", customSnd[s.id] ? "has" : "");
+    bSnd.addEventListener("click", () => fSnd.click());
+
+    const bPlay = stBtnEl("▶ きく");
+    bPlay.addEventListener("click", () => { stopSpeak(); say([partSubject(s)]); });
+
+    const bUndo = stBtnEl("↩ もどす", "warn");
+    bUndo.disabled = !cardConf[s.id] && !customImg[s.id] && !customSnd[s.id];
+    bUndo.title = "このカードの もじ・え・おとを もとにもどす";
+    bUndo.addEventListener("click", () => resetCard(s.id));
+
+    acts.append(bImg, fImg, bSnd, fSnd, bPlay, bUndo);
+    row.append(ord, thumb, ta, acts);
+    list.appendChild(row);
+  });
+}
+
+function moveCard(id, dir) {
+  const ids = orderedSubjects().filter(s => !s.isClear).map(s => s.id);
+  const i = ids.indexOf(id), j = i + dir;
+  if (i < 0 || j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  cardOrder = ids;
+  saveCards();
+  renderSettings();
+  render();
+}
+
+// 絵／音を 入れ替える。kind は "img" か "snd"。
+async function setCardMedia(id, kind, file) {
+  try {
+    await mediaSet(kind + ":" + id, file);
+  } catch (_) {
+    showToast("mediaError");   // 容量オーバーなど
+    return;
+  }
+  const map = kind === "img" ? customImg : customSnd;
+  dropMediaUrl(map, id);
+  map[id] = URL.createObjectURL(file);
+  renderSettings();
+  render();
+  showToast(kind === "img" ? "imgSet" : "sndSet");
+}
+
+async function resetCard(id) {
+  try { await mediaDel("img:" + id); await mediaDel("snd:" + id); } catch (_) {}
+  dropMediaUrl(customImg, id);
+  dropMediaUrl(customSnd, id);
+  delete cardConf[id];
+  applyCardConf();
+  saveCards();
+  renderSettings();
+  render();
+  showToast("cardReset");
+}
+
+async function resetAllCards() {
+  try {
+    const keys = await mediaKeys();
+    for (const k of keys) await mediaDel(k);
+  } catch (_) {}
+  SUBJECTS.forEach(s => { dropMediaUrl(customImg, s.id); dropMediaUrl(customSnd, s.id); });
+  cardConf  = {};
+  cardOrder = null;
+  applyCardConf();
+  saveCards();
+  renderSettings();
+  render();
+  showToast("cardReset");
+}
+
 // ── 保存・読み込み ────────────────────────
 function saveSchedule() {
   try {
@@ -723,21 +1186,39 @@ function loadSchedule() {
 }
 
 // ── トースト ──────────────────────────────
+const TOASTS = {
+  saved:      ["💾 ほぞんしました！",            "#2ECC71"],
+  loaded:     ["📂 よみこみました！",            "#2ECC71"],
+  error:      ["⚠️ ほぞんできませんでした",      "#E74C3C"],
+  hold:       ["⚙️ ながおし すると ひらくよ",    "#8E44AD"],
+  imgSet:     ["🖼 えを かえました",             "#2ECC71"],
+  sndSet:     ["🔊 おとを かえました",           "#2ECC71"],
+  mediaError: ["⚠️ この ファイルは つかえません", "#E74C3C"],
+  cardReset:  ["↩ もとに もどしました",          "#2ECC71"],
+};
+
 function showToast(type) {
+  const t = TOASTS[type];
+  if (!t) return;
   const el = document.getElementById("toast");
   clearTimeout(toastTimer);
-  if (type === "saved")  { el.textContent = "💾 ほぞんしました！";      el.style.background = "#2ECC71"; }
-  if (type === "loaded") { el.textContent = "📂 よみこみました！";       el.style.background = "#2ECC71"; }
-  if (type === "error")  { el.textContent = "⚠️ ほぞんできませんでした"; el.style.background = "#E74C3C"; }
-  el.style.display = "block";
+  el.textContent     = t[0];
+  el.style.background = t[1];
+  el.style.display   = "block";
   toastTimer = setTimeout(() => { el.style.display = "none"; }, 2000);
 }
 
 // ── 起動 ─────────────────────────────────
 loadTts();
 applyTtsUI();   // 音声ファイルで鳴らすので、合成音声が無いブラウザでもボタンは出す
+loadCards();
 loadSchedule();
 render();
+// 自前の絵と音は IndexedDB から あとで届くので、届いたら描きなおす
+loadCustomMedia().then(() => {
+  render();
+  if (!document.getElementById("settings").hidden) renderSettings();
+});
 </script>
 </body>
 </html>

@@ -382,9 +382,22 @@
     white-space: nowrap;
   }
   .st-btn:disabled { opacity: 0.3; cursor: default; }
+  /* 文字が変わるボタンは幅を固定して、行ごとに ますの幅が ずれないようにする */
+  .st-btn.play   { min-width: 8.4em; }   /* ▶ もとの おと／ろくおん／よみあげ */
+  .st-btn.recbtn { min-width: 7.4em; }   /* 🎙 ろくおん／⏹ とめる 10 */
   /* そのカードに自前の絵／音が入っているとき */
   .st-btn.has  { border-color:#A3E4D7; background:#E8F8F5; color:#117A65; }
   .st-btn.warn { border-color:#F5B7B1; background:#FDEDEC; color:#C0392B; }
+  /* 録音中 */
+  .st-btn.rec {
+    border-color: #C0392B;
+    background: #E74C3C;
+    color: #fff;
+    animation: recPulse 1s ease-in-out infinite;
+  }
+  @keyframes recPulse {
+    50% { box-shadow: 0 0 0 5px #E74C3C44; }
+  }
 </style>
 </head>
 <body>
@@ -431,7 +444,8 @@
     <div class="st-foot">
       <div class="st-note">
         へんこうは この タブレット（ブラウザ）だけに のこります。<br>
-        もじの 2ぎょうめは、ますの なかで かいぎょう すると つくれます。
+        もじの 2ぎょうめは、ますの なかで かいぎょう すると つくれます。<br>
+        🎙 ろくおん は もういちど おすと とまります（いちばん ながくて 10びょう）。
       </div>
       <button class="st-btn warn" id="btn-settings-reset">ぜんぶ もとにもどす</button>
     </div>
@@ -588,7 +602,15 @@ let sayGen  = 0;      // 世代番号。stopSpeak で進めて、古い連鎖を
 let curAudio = null;  // いま鳴っている音声ファイル
 
 const audioCache  = {};        // src → Audio
-const audioFailed = new Set(); // 読めなかった src（以後は合成音声）
+// 読めなかった src → その時刻。しばらくは合成音声で代用し、
+// 時間がたったら もう一度ファイルを試す（Wi-Fi が一瞬切れただけで
+// その日ずっと合成音声になるのを防ぐ）。
+const audioFailed = new Map();
+const AUDIO_RETRY_MS = 30000;
+const recentlyFailed = src => {
+  const t = audioFailed.get(src);
+  return t !== undefined && Date.now() - t < AUDIO_RETRY_MS;
+};
 
 function pickVoice() {
   if (!synth) return;
@@ -636,9 +658,11 @@ function say(parts, onEnd) {
 }
 
 function playPart(part, gen, done) {
-  if (!part.src || audioFailed.has(part.src)) { speakText(part.text, gen, done); return; }
+  if (!part.src || recentlyFailed(part.src)) { speakText(part.text, gen, done); return; }
 
   let a = audioCache[part.src];
+  // 前に失敗した Audio は使いまわさず、作りなおして もう一度読ませる
+  if (a && audioFailed.has(part.src)) { delete audioCache[part.src]; a = null; }
   if (!a) {
     a = new Audio(part.src);
     a.preload = "auto";
@@ -651,6 +675,7 @@ function playPart(part, gen, done) {
     if (settled) return;
     settled = true;
     if (curAudio === a) curAudio = null;
+    audioFailed.delete(part.src);   // 鳴ったので、失敗の記録は消す
     if (gen === sayGen) done();
   };
   // 鳴らせなかったとき。ただし stopSpeak で止めた場合はここを通っても
@@ -660,7 +685,7 @@ function playPart(part, gen, done) {
     settled = true;
     if (curAudio === a) curAudio = null;
     if (gen !== sayGen) return;
-    audioFailed.add(part.src);
+    audioFailed.set(part.src, Date.now());
     speakText(part.text, gen, done);
   };
 
@@ -1014,9 +1039,11 @@ function openSettings() {
   render();
   renderSettings();
   document.getElementById("settings").hidden = false;
+  probeOriginalSounds();   // 「▶ もとの おと」が本当に鳴るか確かめる
 }
 
 function closeSettings() {
+  cancelRecord();
   stopSpeak();
   document.getElementById("settings").hidden = true;
   render();
@@ -1085,16 +1112,15 @@ function renderSettings() {
     const bImg = stBtnEl(customImg[s.id] ? "🖼 え ✓" : "🖼 え", customImg[s.id] ? "has" : "");
     bImg.addEventListener("click", () => fImg.click());
 
-    const fSnd = document.createElement("input");
-    fSnd.type = "file"; fSnd.accept = "audio/*"; fSnd.hidden = true;
-    fSnd.addEventListener("change", () => {
-      if (fSnd.files[0]) setCardMedia(s.id, "snd", fSnd.files[0]);
-      fSnd.value = "";
-    });
-    const bSnd = stBtnEl(customSnd[s.id] ? "🔊 おと ✓" : "🔊 おと", customSnd[s.id] ? "has" : "");
-    bSnd.addEventListener("click", () => fSnd.click());
+    // おとは マイクで録音する。録音中は同じボタンが「とめる」になる。
+    const recording = rec && rec.id === s.id;
+    const bRec = stBtnEl(recording ? `⏹ とめる ${recSec()}` : "🎙 ろくおん", recording ? "recbtn rec" : "recbtn");
+    if (recording) bRec.id = "st-rec-active";
+    bRec.addEventListener("click", () => (rec ? stopRecord() : startRecord(s.id)));
 
-    const bPlay = stBtnEl("▶ きく");
+    // いま鳴る音の種類を、ボタンの文字で見せる
+    const bPlay = stBtnEl("▶ きく", "play");
+    bPlay.dataset.playId = s.id;
     bPlay.addEventListener("click", () => { stopSpeak(); say([partSubject(s)]); });
 
     const bUndo = stBtnEl("↩ もどす", "warn");
@@ -1102,10 +1128,141 @@ function renderSettings() {
     bUndo.title = "このカードの もじ・え・おとを もとにもどす";
     bUndo.addEventListener("click", () => resetCard(s.id));
 
-    acts.append(bImg, fImg, bSnd, fSnd, bPlay, bUndo);
+    acts.append(bImg, fImg, bRec, bPlay, bUndo);
     row.append(ord, thumb, ta, acts);
     list.appendChild(row);
   });
+
+  refreshPlayLabels();
+
+  // 録音中は、とめるボタン以外を押せなくする
+  const busy = !!rec;
+  list.querySelectorAll(".st-btn").forEach(b => {
+    if (busy && b.id !== "st-rec-active") b.disabled = true;
+  });
+  document.getElementById("btn-settings-reset").disabled = busy;
+}
+
+// ── 「▶」ボタンに、いま鳴る音の種類を出す ──
+// もとの音声ファイルが本当に鳴らせるかは、開いたときに確かめる。
+const origSndOk = {};   // id → true（鳴る）／false（ファイルが無い）
+
+function playLabel(s) {
+  if (customSnd[s.id])           return ["▶ ろくおん",   "has"];
+  if (origSndOk[s.id] === true)  return ["▶ もとの おと", ""];
+  if (origSndOk[s.id] === false) return ["▶ よみあげ",   ""];   // 合成音声で読む
+  return ["▶ きく", ""];                                         // まだ確かめ中
+}
+
+// 文字を書いている途中でも邪魔しないよう、作り直さずにボタンの字だけ変える
+function refreshPlayLabels() {
+  document.querySelectorAll("#settings-list [data-play-id]").forEach(b => {
+    const s = SUBJECTS.find(x => x.id === b.dataset.playId);
+    if (!s) return;
+    const [label, cls] = playLabel(s);
+    b.textContent = label;
+    b.classList.toggle("has", cls === "has");
+  });
+}
+
+// 開くたびに呼ぶ。鳴ると分かったものは そのまま、読めなかったものは
+// 確かめなおす（サーバーや Wi-Fi が戻っていれば「もとの おと」に戻る）。
+function probeOriginalSounds() {
+  SUBJECTS.forEach(s => {
+    if (s.isClear || origSndOk[s.id] === true) return;
+    delete origSndOk[s.id];
+    const a = new Audio();
+    a.preload = "metadata";
+    let settled = false;
+    const done = ok => {
+      if (settled) return;
+      settled = true;
+      origSndOk[s.id] = ok;
+      refreshPlayLabels();
+    };
+    a.addEventListener("loadedmetadata", () => done(true),  { once: true });
+    a.addEventListener("error",          () => done(false), { once: true });
+    a.src = SOUND_DIR + s.id + ".mp3";
+  });
+}
+
+// ── 録音 ──────────────────────────────────
+// マイクの許可は ブラウザが たずねる。録音は この端末の中だけに残る。
+const REC_MAX_SEC = 10;   // 押しっぱなしで長くなりすぎないように
+let rec = null;           // { id, mr, stream, chunks, startedAt, timer, cancelled }
+
+const recSec = () => rec ? Math.floor((Date.now() - rec.startedAt) / 1000) : 0;
+
+function pickRecMime() {
+  const cands = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  return cands.find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || "";
+}
+
+async function startRecord(id) {
+  if (rec) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+    showToast("recUnsupported");
+    return;
+  }
+  stopSpeak();
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (_) {
+    showToast("micDenied");
+    return;
+  }
+
+  const mime = pickRecMime();
+  let mr;
+  try {
+    mr = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+  } catch (_) {
+    stream.getTracks().forEach(t => t.stop());
+    showToast("recUnsupported");
+    return;
+  }
+
+  const chunks = [];
+  mr.addEventListener("dataavailable", e => { if (e.data && e.data.size) chunks.push(e.data); });
+  mr.addEventListener("stop", async () => {
+    const r = rec;
+    rec = null;
+    clearInterval(r.timer);
+    stream.getTracks().forEach(t => t.stop());   // マイクを はなす
+
+    const blob = new Blob(chunks, { type: mr.mimeType || mime || "audio/webm" });
+    if (r.cancelled || blob.size === 0) { renderSettings(); return; }
+
+    await setCardMedia(id, "snd", blob, "recDone");
+    // 録れた音を そのまま聞かせる
+    const s = SUBJECTS.find(x => x.id === id);
+    if (s) say([partSubject(s)]);
+  });
+
+  rec = { id, mr, stream, startedAt: Date.now(), timer: null, cancelled: false };
+  rec.timer = setInterval(() => {
+    if (!rec) return;
+    const sec = recSec();
+    const b = document.getElementById("st-rec-active");
+    if (b) b.textContent = `⏹ とめる ${sec}`;
+    if (sec >= REC_MAX_SEC) stopRecord();
+  }, 250);
+
+  mr.start();
+  renderSettings();
+}
+
+function stopRecord() {
+  if (rec && rec.mr.state !== "inactive") rec.mr.stop();
+}
+
+// 画面を閉じたときなどは、録音を すてる
+function cancelRecord() {
+  if (!rec) return;
+  rec.cancelled = true;
+  stopRecord();
 }
 
 function moveCard(id, dir) {
@@ -1119,8 +1276,8 @@ function moveCard(id, dir) {
   render();
 }
 
-// 絵／音を 入れ替える。kind は "img" か "snd"。
-async function setCardMedia(id, kind, file) {
+// 絵／音を 入れ替える。kind は "img" か "snd"。file は File でも Blob でもよい。
+async function setCardMedia(id, kind, file, toastType) {
   try {
     await mediaSet(kind + ":" + id, file);
   } catch (_) {
@@ -1132,7 +1289,7 @@ async function setCardMedia(id, kind, file) {
   map[id] = URL.createObjectURL(file);
   renderSettings();
   render();
-  showToast(kind === "img" ? "imgSet" : "sndSet");
+  showToast(toastType || (kind === "img" ? "imgSet" : "sndSet"));
 }
 
 async function resetCard(id) {
@@ -1193,6 +1350,9 @@ const TOASTS = {
   hold:       ["⚙️ ながおし すると ひらくよ",    "#8E44AD"],
   imgSet:     ["🖼 えを かえました",             "#2ECC71"],
   sndSet:     ["🔊 おとを かえました",           "#2ECC71"],
+  recDone:    ["🎙 ろくおん しました",           "#2ECC71"],
+  micDenied:  ["⚠️ マイクが つかえません（きょかを してください）", "#E74C3C"],
+  recUnsupported: ["⚠️ この ブラウザでは ろくおん できません", "#E74C3C"],
   mediaError: ["⚠️ この ファイルは つかえません", "#E74C3C"],
   cardReset:  ["↩ もとに もどしました",          "#2ECC71"],
 };
